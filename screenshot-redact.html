@@ -240,8 +240,21 @@
 
       <!-- PDF download -->
       <div id="dl-pdf" style="display:none">
-        <input type="password" class="pw-input" id="out-pw" placeholder="輸出 PDF 密碼（選填）">
-        <button class="btn primary" style="margin-top:6px" onclick="downloadPDF()">下載 PDF</button>
+        <div class="mode-toggle" style="margin-bottom:6px">
+          <button class="mode-btn active" id="btn-png" onclick="setOutFmt('png')">清晰 PNG</button>
+          <button class="mode-btn" id="btn-jpg" onclick="setOutFmt('jpg')">壓縮 JPG</button>
+        </div>
+        <div id="jpg-q-pdf" style="display:none">
+          <div class="sl">
+            <label>品質 <span id="q-pdf-val">92</span>%</label>
+            <input type="range" id="jpg-q-pdf" min="60" max="100" value="92"
+                   oninput="document.getElementById('q-pdf-val').textContent=this.value">
+          </div>
+        </div>
+        <button class="btn primary" onclick="downloadPDF()">下載 PDF</button>
+        <p style="font-size:0.7rem;color:#374151;margin-top:6px;line-height:1.5">
+          PDF 密碼保護需使用桌面軟體<br>（如 Adobe Acrobat、LibreOffice）
+        </p>
       </div>
 
       <div class="status" id="status"></div>
@@ -291,18 +304,21 @@ let mode       = 'blur';
 let drawing    = false;
 let sx, sy, cx, cy;
 
-let isPDF      = false;
-let pdfDoc     = null;
-let totalPages = 0;
-let currentPage= 1;
-let pageCache  = {};       // {n: Image} rendered pages
-let pageRegions= {};       // {n: Region[]}
-let pwResolve  = null;     // for password prompt
+let isPDF        = false;
+let pdfDoc       = null;
+let totalPages   = 0;
+let currentPage  = 1;
+let pageCache    = {};       // {n: Image} rendered pages
+let pageRegions  = {};       // {n: Region[]}
+let pwResolve    = null;     // for password prompt
+let origFilename = 'redacted';
+let pdfOutFmt    = 'png';   // 'png' | 'jpg'
 
 // ── File loading ──────────────────────────────────────────────
 
 function loadFile(file) {
   if (!file) return;
+  origFilename = file.name.replace(/\.[^.]+$/, '') || 'redacted';
   if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
     loadPDF(file);
   } else if (file.type.startsWith('image/')) {
@@ -551,6 +567,13 @@ function clearPresetActive() {
   document.querySelectorAll('.cp').forEach(e => e.classList.remove('on'));
 }
 
+function setOutFmt(fmt) {
+  pdfOutFmt = fmt;
+  document.getElementById('btn-png').classList.toggle('active', fmt==='png');
+  document.getElementById('btn-jpg').classList.toggle('active', fmt==='jpg');
+  document.getElementById('jpg-q-pdf').style.display = fmt==='jpg' ? '' : 'none';
+}
+
 function undo()     { if (!regions.length) return; regions.pop(); setCount(); render(); }
 function clearAll() { if (!regions.length) return; regions=[]; setCount(); render(); }
 function setCount() { document.getElementById('region-count').textContent = regions.length; }
@@ -563,8 +586,9 @@ function download(fmt) {
   document.getElementById('jpg-q-row').style.display = fmt==='jpg' ? '' : 'none';
   const q    = parseInt(document.getElementById('jpg-q').value) / 100;
   const mime = fmt==='png' ? 'image/png' : 'image/jpeg';
+  const date = new Date().toISOString().slice(0,10).replace(/-/g,'');
   const a = document.createElement('a');
-  a.href = canvas.toDataURL(mime, q); a.download = `redacted.${fmt}`; a.click();
+  a.href = canvas.toDataURL(mime, q); a.download = `${origFilename}_${date}.${fmt}`; a.click();
   showStatus(`已下載 ${fmt.toUpperCase()}`, true);
 }
 
@@ -584,6 +608,9 @@ async function downloadPDF() {
     const { PDFDocument } = PDFLib;
     const outDoc = await PDFDocument.create();
 
+    const useJpg = pdfOutFmt === 'jpg';
+    const jpgQ   = parseInt(document.getElementById('jpg-q-pdf').value) / 100;
+
     for (let n = 1; n <= totalPages; n++) {
       document.getElementById('loading-msg').textContent = `處理第 ${n} / ${totalPages} 頁…`;
       const pageImg = await renderPageToImg(n);
@@ -593,24 +620,27 @@ async function downloadPDF() {
       oc.drawImage(pageImg, 0, 0);
       for (const r of (pageRegions[n] || [])) applyRegion(oc, pageImg, r);
 
-      const jpgData  = off.toDataURL('image/jpeg', 0.95);
-      const jpgBytes = await fetch(jpgData).then(r => r.arrayBuffer());
-      const jpgImg   = await outDoc.embedJpg(jpgBytes);
-      const page     = outDoc.addPage([jpgImg.width, jpgImg.height]);
-      page.drawImage(jpgImg, { x: 0, y: 0, width: jpgImg.width, height: jpgImg.height });
+      let embeddedImg;
+      if (useJpg) {
+        const data  = off.toDataURL('image/jpeg', jpgQ);
+        const bytes = await fetch(data).then(r => r.arrayBuffer());
+        embeddedImg = await outDoc.embedJpg(bytes);
+      } else {
+        const data  = off.toDataURL('image/png');
+        const bytes = await fetch(data).then(r => r.arrayBuffer());
+        embeddedImg = await outDoc.embedPng(bytes);
+      }
+
+      const page = outDoc.addPage([embeddedImg.width, embeddedImg.height]);
+      page.drawImage(embeddedImg, { x: 0, y: 0, width: embeddedImg.width, height: embeddedImg.height });
     }
 
-    const pw = document.getElementById('out-pw').value.trim();
-    const saveOpts = pw
-      ? { userPassword: pw, ownerPassword: pw,
-          permissions: { printing: 'lowResolution', copying: false } }
-      : {};
-
-    const bytes = await outDoc.save(saveOpts);
+    const date  = new Date().toISOString().slice(0,10).replace(/-/g,'');
+    const bytes = await outDoc.save();
     const blob  = new Blob([bytes], { type: 'application/pdf' });
     const a     = document.createElement('a');
     a.href      = URL.createObjectURL(blob);
-    a.download  = 'redacted.pdf'; a.click();
+    a.download  = `${origFilename}_${date}.pdf`; a.click();
     hideLoading(); showStatus('已下載 PDF', true);
   } catch (e) {
     hideLoading(); showStatus('產生失敗：' + e.message);

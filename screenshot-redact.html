@@ -4,12 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>screenshot-redact</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: #0f1117; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; min-height: 100vh; display: flex; flex-direction: column; }
 
   header { padding: 14px 24px; border-bottom: 1px solid #2a2d3e; display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
-  header h1 { font-size: 1.1rem; color: #7dd3fc; letter-spacing: -0.01em; }
+  header h1 { font-size: 1.1rem; color: #7dd3fc; }
   header .sub { color: #475569; font-size: 0.82rem; }
   header .privacy { margin-left: auto; font-size: 0.72rem; color: #374151; }
 
@@ -30,7 +32,6 @@
   .drop-zone svg { width: 56px; height: 56px; opacity: 0.25; }
   .drop-zone p { font-size: 1rem; color: #475569; }
   .drop-zone small { font-size: 0.78rem; }
-
   .upload-btn {
     pointer-events: all; background: #1e3a5f; color: #7dd3fc;
     border: 1px solid #2563eb; padding: 9px 22px; border-radius: 6px;
@@ -41,7 +42,6 @@
   #canvas {
     display: none; cursor: crosshair;
     max-width: 100%; max-height: calc(100vh - 54px);
-    image-rendering: -webkit-optimize-contrast; image-rendering: crisp-edges;
   }
 
   /* ── Sidebar ── */
@@ -59,38 +59,29 @@
     border-radius: 8px; font-size: 0.68rem; color: #94a3b8; font-weight: normal;
   }
 
-  /* Mode toggle */
   .mode-toggle { display: flex; gap: 4px; }
   .mode-btn {
     flex: 1; padding: 7px 4px; border: 1px solid #334155; background: #0f1117;
     color: #94a3b8; border-radius: 5px; cursor: pointer; font-size: 0.8rem; text-align: center;
-    transition: all .15s;
   }
   .mode-btn.active { background: #7dd3fc; color: #000; border-color: #7dd3fc; font-weight: 600; }
 
-  /* Slider */
   .sl { margin-top: 9px; }
   .sl label { font-size: 0.78rem; color: #94a3b8; display: flex; justify-content: space-between; margin-bottom: 4px; }
   input[type=range] { width: 100%; accent-color: #7dd3fc; cursor: pointer; }
 
-  /* Color presets */
   .presets { display: flex; gap: 6px; margin-top: 9px; flex-wrap: wrap; }
-  .cp {
-    width: 24px; height: 24px; border-radius: 4px;
-    border: 2px solid #334155; cursor: pointer; transition: border-color .1s;
-  }
+  .cp { width: 24px; height: 24px; border-radius: 4px; border: 2px solid #334155; cursor: pointer; }
   .cp:hover, .cp.on { border-color: #7dd3fc; }
 
-  /* Color picker row */
   .cr { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
   .cr label { font-size: 0.78rem; color: #94a3b8; flex: 1; }
   input[type=color] { width: 36px; height: 28px; border: 1px solid #334155; border-radius: 4px; background: none; cursor: pointer; padding: 2px; }
 
-  /* Buttons */
   .btn {
     width: 100%; padding: 8px; border: 1px solid #334155; background: #0f1117;
     color: #cbd5e1; border-radius: 5px; cursor: pointer; font-size: 0.8rem;
-    text-align: center; margin-bottom: 5px; transition: all .15s;
+    text-align: center; margin-bottom: 5px;
   }
   .btn:last-child { margin-bottom: 0; }
   .btn:hover { background: #1a2040; border-color: #7dd3fc; color: #7dd3fc; }
@@ -98,25 +89,69 @@
   .btn.danger:hover { background: #2d0808; border-color: #dc2626; }
   .btn.primary { background: #1e3a5f; border-color: #2563eb; color: #7dd3fc; font-weight: 600; }
   .btn.primary:hover { background: #1e40af; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* Page nav */
+  .page-nav { display: flex; align-items: center; gap: 6px; }
+  .page-nav button {
+    background: #0f1117; border: 1px solid #334155; color: #94a3b8;
+    border-radius: 4px; padding: 4px 10px; cursor: pointer; font-size: 0.85rem;
+  }
+  .page-nav button:hover:not(:disabled) { border-color: #7dd3fc; color: #7dd3fc; }
+  .page-nav button:disabled { opacity: 0.3; cursor: not-allowed; }
+  .page-nav span { flex: 1; text-align: center; font-size: 0.8rem; color: #94a3b8; }
+
+  /* Password input */
+  .pw-input {
+    width: 100%; padding: 7px 10px; background: #0f1117; border: 1px solid #334155;
+    border-radius: 5px; color: #e0e0e0; font-size: 0.82rem; margin-top: 6px;
+  }
+  .pw-input:focus { outline: none; border-color: #7dd3fc; }
 
   .dl-row { display: flex; gap: 5px; }
   .dl-row .btn { margin-bottom: 0; }
 
   .status { font-size: 0.73rem; color: #475569; text-align: center; margin-top: 7px; min-height: 16px; }
   .status.ok { color: #4ade80; }
+  .status.err { color: #f87171; }
 
-  .hint {
-    flex: 1; display: flex; align-items: flex-end;
-    padding: 14px;
-  }
+  .hint { flex: 1; display: flex; align-items: flex-end; padding: 14px; }
   .hint p { font-size: 0.72rem; color: #334155; line-height: 1.7; }
+
+  /* Password overlay */
+  #pw-overlay {
+    display: none; position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7); z-index: 100;
+    align-items: center; justify-content: center;
+  }
+  #pw-overlay.show { display: flex; }
+  .pw-box {
+    background: #1a1d2e; border: 1px solid #334155; border-radius: 10px;
+    padding: 28px 32px; min-width: 300px; display: flex; flex-direction: column; gap: 12px;
+  }
+  .pw-box h2 { font-size: 0.95rem; color: #7dd3fc; }
+  .pw-box p  { font-size: 0.82rem; color: #94a3b8; }
+  .pw-box-row { display: flex; gap: 8px; }
+  .pw-cancel { flex: 1; padding: 8px; border: 1px solid #334155; background: none; color: #94a3b8; border-radius: 5px; cursor: pointer; font-size: 0.82rem; }
+  .pw-ok     { flex: 2; padding: 8px; background: #1e3a5f; border: 1px solid #2563eb; color: #7dd3fc; border-radius: 5px; cursor: pointer; font-size: 0.82rem; font-weight: 600; }
+
+  /* Loading */
+  #loading {
+    display: none; position: absolute; inset: 0;
+    background: rgba(8,11,16,0.85); align-items: center; justify-content: center;
+    flex-direction: column; gap: 12px; z-index: 10;
+  }
+  #loading.show { display: flex; }
+  .spinner { width: 32px; height: 32px; border: 3px solid #334155; border-top-color: #7dd3fc; border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #loading p { font-size: 0.82rem; color: #64748b; }
 </style>
 </head>
 <body>
 
 <header>
   <h1>screenshot-redact</h1>
-  <span class="sub">截圖遮蔽工具</span>
+  <span class="sub">截圖 &amp; PDF 遮蔽工具</span>
   <span class="privacy">純瀏覽器 · 不上傳 · 不儲存</span>
 </header>
 
@@ -130,12 +165,13 @@
         <circle cx="8.5" cy="8.5" r="1.5"/>
         <path d="M21 15l-5-5L5 21"/>
       </svg>
-      <p>拖曳截圖到這裡</p>
+      <p>拖曳截圖或 PDF 到這裡</p>
       <small>或貼上 Ctrl+V</small>
-      <button class="upload-btn" onclick="document.getElementById('file-input').click()">選擇圖片</button>
-      <small>PNG · JPG · WebP</small>
+      <button class="upload-btn" onclick="document.getElementById('file-input').click()">選擇檔案</button>
+      <small>PNG · JPG · WebP · PDF</small>
     </div>
     <canvas id="canvas"></canvas>
+    <div id="loading"><div class="spinner"></div><p id="loading-msg">載入中…</p></div>
   </div>
 
   <!-- Sidebar -->
@@ -147,8 +183,6 @@
         <button class="mode-btn active" id="btn-blur" onclick="setMode('blur')">模糊</button>
         <button class="mode-btn" id="btn-fill" onclick="setMode('fill')">填色</button>
       </div>
-
-      <!-- Blur -->
       <div id="blur-cfg">
         <div class="sl">
           <label>強度 <span id="blur-val">14</span> px</label>
@@ -156,8 +190,6 @@
                  oninput="document.getElementById('blur-val').textContent=this.value">
         </div>
       </div>
-
-      <!-- Fill -->
       <div id="fill-cfg" style="display:none">
         <div class="presets">
           <div class="cp on"  style="background:#000000" data-c="#000000" onclick="pickColor(this)"></div>
@@ -174,6 +206,16 @@
       </div>
     </div>
 
+    <!-- PDF page nav (hidden for images) -->
+    <div class="sb" id="pdf-nav" style="display:none">
+      <h3>頁面</h3>
+      <div class="page-nav">
+        <button id="prev-btn" onclick="goToPage(currentPage-1)" disabled>◀</button>
+        <span id="page-info">1 / 1</span>
+        <button id="next-btn" onclick="goToPage(currentPage+1)" disabled>▶</button>
+      </div>
+    </div>
+
     <div class="sb">
       <h3>區域 <span class="badge" id="region-count">0</span></h3>
       <button class="btn" onclick="undo()">↩ 撤銷最後一個</button>
@@ -182,15 +224,26 @@
 
     <div class="sb">
       <h3>下載</h3>
-      <div class="dl-row">
-        <button class="btn primary" onclick="download('png')">PNG</button>
-        <button class="btn primary" onclick="download('jpg')">JPG</button>
+
+      <!-- Image download -->
+      <div id="dl-image">
+        <div class="dl-row">
+          <button class="btn primary" onclick="download('png')">PNG</button>
+          <button class="btn primary" onclick="download('jpg')">JPG</button>
+        </div>
+        <div class="sl" id="jpg-q-row" style="display:none">
+          <label>品質 <span id="q-val">92</span>%</label>
+          <input type="range" id="jpg-q" min="60" max="100" value="92"
+                 oninput="document.getElementById('q-val').textContent=this.value">
+        </div>
       </div>
-      <div class="sl" id="jpg-q-row" style="display:none">
-        <label>品質 <span id="q-val">92</span>%</label>
-        <input type="range" id="jpg-q" min="60" max="100" value="92"
-               oninput="document.getElementById('q-val').textContent=this.value">
+
+      <!-- PDF download -->
+      <div id="dl-pdf" style="display:none">
+        <input type="password" class="pw-input" id="out-pw" placeholder="輸出 PDF 密碼（選填）">
+        <button class="btn primary" style="margin-top:6px" onclick="downloadPDF()">下載 PDF</button>
       </div>
+
       <div class="status" id="status"></div>
     </div>
 
@@ -198,104 +251,234 @@
       <p>
         在圖片上拖曳框出要遮蔽的區域<br>
         支援多個區域疊加<br>
-        所有處理在你的瀏覽器本機完成
+        PDF 每頁獨立標記<br>
+        所有處理在瀏覽器本機完成
       </p>
     </div>
 
   </div>
 </div>
 
-<input type="file" id="file-input" accept="image/*" onchange="loadFile(this.files[0])">
+<!-- Password overlay -->
+<div id="pw-overlay">
+  <div class="pw-box">
+    <h2>🔒 PDF 有密碼保護</h2>
+    <p>請輸入密碼來開啟此 PDF</p>
+    <input type="password" class="pw-input" id="pw-input" placeholder="PDF 密碼" onkeydown="if(event.key==='Enter')submitPw()">
+    <p id="pw-error" style="color:#f87171;font-size:0.78rem;display:none">密碼錯誤，請重試</p>
+    <div class="pw-box-row">
+      <button class="pw-cancel" onclick="cancelPw()">取消</button>
+      <button class="pw-ok" onclick="submitPw()">確認</button>
+    </div>
+  </div>
+</div>
+
+<input type="file" id="file-input" accept="image/*,.pdf" onchange="loadFile(this.files[0])">
 
 <script>
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
 const canvas  = document.getElementById('canvas');
 const ctx     = canvas.getContext('2d');
 const cArea   = document.getElementById('canvas-area');
 const dropZone= document.getElementById('drop-zone');
 
-let img     = null;   // original Image object
-let regions = [];     // [{x,y,w,h,type,blur,color}]
-let mode    = 'blur';
-let drawing = false;
-let sx, sy, cx, cy;  // start / current mouse pos (canvas coords)
+// ── State ─────────────────────────────────────────────────────
+let img        = null;     // current page Image
+let regions    = [];       // regions for current page/image
+let mode       = 'blur';
+let drawing    = false;
+let sx, sy, cx, cy;
 
-// ── Image loading ─────────────────────────────────────────────
+let isPDF      = false;
+let pdfDoc     = null;
+let totalPages = 0;
+let currentPage= 1;
+let pageCache  = {};       // {n: Image} rendered pages
+let pageRegions= {};       // {n: Region[]}
+let pwResolve  = null;     // for password prompt
+
+// ── File loading ──────────────────────────────────────────────
 
 function loadFile(file) {
-  if (!file || !file.type.startsWith('image/')) return;
-  const url = URL.createObjectURL(file);
-  loadSrc(url);
+  if (!file) return;
+  if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+    loadPDF(file);
+  } else if (file.type.startsWith('image/')) {
+    loadImage(file);
+  }
 }
 
-function loadSrc(src) {
+function loadImage(file) {
+  isPDF = false;
+  const url = URL.createObjectURL(file);
   const i = new Image();
   i.onload = () => {
-    img = i;
-    regions = [];
-    canvas.width  = i.naturalWidth;
-    canvas.height = i.naturalHeight;
-    dropZone.style.display = 'none';
-    canvas.style.display   = 'block';
-    render();
-    setCount();
+    img = i; regions = [];
+    canvas.width = i.naturalWidth; canvas.height = i.naturalHeight;
+    showCanvas(); render(); setCount();
+    document.getElementById('pdf-nav').style.display = 'none';
+    document.getElementById('dl-image').style.display = '';
+    document.getElementById('dl-pdf').style.display   = 'none';
   };
-  i.src = src;
+  i.src = url;
 }
 
-// Paste (Ctrl+V)
+async function loadPDF(file) {
+  isPDF = true; pdfDoc = null; pageCache = {}; pageRegions = {};
+  showLoading('載入 PDF…');
+  const buf = await file.arrayBuffer();
+  await openPDF(buf, null);
+}
+
+async function openPDF(buf, password) {
+  try {
+    const loadTask = pdfjsLib.getDocument({ data: buf, password: password || '' });
+    loadTask.onPassword = (updatePw, reason) => {
+      hideLoading();
+      promptPassword(reason).then(pw => {
+        if (pw === null) { hidePwOverlay(); return; }
+        showLoading('解密中…');
+        updatePw(pw);
+      });
+    };
+    pdfDoc = await loadTask.promise;
+    totalPages  = pdfDoc.numPages;
+    currentPage = 1;
+    hidePwOverlay();
+    await goToPage(1);
+    document.getElementById('pdf-nav').style.display    = '';
+    document.getElementById('dl-image').style.display   = 'none';
+    document.getElementById('dl-pdf').style.display     = '';
+  } catch (e) {
+    hideLoading();
+    if (e.name !== 'PasswordException') showStatus('無法開啟 PDF：' + e.message, false);
+  }
+}
+
+function promptPassword(reason) {
+  return new Promise(resolve => {
+    pwResolve = resolve;
+    const overlay = document.getElementById('pw-overlay');
+    const errEl   = document.getElementById('pw-error');
+    const input   = document.getElementById('pw-input');
+    errEl.style.display = reason === 2 ? '' : 'none'; // 2 = wrong pw
+    input.value = '';
+    overlay.classList.add('show');
+    setTimeout(() => input.focus(), 50);
+  });
+}
+
+function submitPw() {
+  const pw = document.getElementById('pw-input').value;
+  if (!pw) return;
+  hidePwOverlay();
+  showLoading('解密中…');
+  if (pwResolve) { pwResolve(pw); pwResolve = null; }
+}
+
+function cancelPw() {
+  hidePwOverlay();
+  if (pwResolve) { pwResolve(null); pwResolve = null; }
+}
+
+function hidePwOverlay() {
+  document.getElementById('pw-overlay').classList.remove('show');
+}
+
+async function renderPageToImg(n) {
+  if (pageCache[n]) return pageCache[n];
+  const page     = await pdfDoc.getPage(n);
+  const viewport = page.getViewport({ scale: 2.0 });
+  const off      = document.createElement('canvas');
+  off.width  = viewport.width;
+  off.height = viewport.height;
+  await page.render({ canvasContext: off.getContext('2d'), viewport }).promise;
+  return new Promise(resolve => {
+    const i = new Image();
+    i.onload = () => { pageCache[n] = i; resolve(i); };
+    i.src = off.toDataURL();
+  });
+}
+
+async function goToPage(n) {
+  if (n < 1 || n > totalPages) return;
+  if (isPDF) pageRegions[currentPage] = [...regions];
+  currentPage = n;
+  showLoading(`載入第 ${n} 頁…`);
+  img = await renderPageToImg(n);
+  regions = [...(pageRegions[n] || [])];
+  canvas.width  = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  showCanvas(); hideLoading(); render(); setCount(); updatePageNav();
+}
+
+function updatePageNav() {
+  document.getElementById('page-info').textContent = `${currentPage} / ${totalPages}`;
+  document.getElementById('prev-btn').disabled = currentPage <= 1;
+  document.getElementById('next-btn').disabled = currentPage >= totalPages;
+}
+
+// ── UI helpers ────────────────────────────────────────────────
+
+function showCanvas() {
+  dropZone.style.display = 'none';
+  canvas.style.display   = 'block';
+}
+
+function showLoading(msg) {
+  document.getElementById('loading-msg').textContent = msg;
+  document.getElementById('loading').classList.add('show');
+}
+
+function hideLoading() {
+  document.getElementById('loading').classList.remove('show');
+}
+
+// ── Input events ──────────────────────────────────────────────
+
 document.addEventListener('paste', e => {
   for (const item of (e.clipboardData?.items || [])) {
     if (item.type.startsWith('image/')) { loadFile(item.getAsFile()); break; }
   }
 });
 
-// Drag & drop on the whole canvas area
 cArea.addEventListener('dragover',  e => { e.preventDefault(); cArea.classList.add('drag-over'); });
-cArea.addEventListener('dragleave', ()=> cArea.classList.remove('drag-over'));
+cArea.addEventListener('dragleave', () => cArea.classList.remove('drag-over'));
 cArea.addEventListener('drop', e => {
   e.preventDefault(); cArea.classList.remove('drag-over');
   if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
 });
 
-// ── Canvas coordinate conversion ──────────────────────────────
+// ── Drawing ───────────────────────────────────────────────────
 
 function canvasPos(e) {
-  const r  = canvas.getBoundingClientRect();
-  const sx = canvas.width  / r.width;
-  const sy = canvas.height / r.height;
-  return { x: (e.clientX - r.left) * sx, y: (e.clientY - r.top) * sy };
+  const r = canvas.getBoundingClientRect();
+  return {
+    x: (e.clientX - r.left) * (canvas.width  / r.width),
+    y: (e.clientY - r.top)  * (canvas.height / r.height),
+  };
 }
-
-// ── Drawing ───────────────────────────────────────────────────
 
 canvas.addEventListener('mousedown', e => {
   if (!img) return;
-  drawing = true;
-  const p = canvasPos(e); sx = cx = p.x; sy = cy = p.y;
+  drawing = true; const p = canvasPos(e); sx = cx = p.x; sy = cy = p.y;
 });
 
 canvas.addEventListener('mousemove', e => {
-  if (!drawing) return;
-  const p = canvasPos(e); cx = p.x; cy = p.y;
-  render(true);
+  if (!drawing) return; const p = canvasPos(e); cx = p.x; cy = p.y; render(true);
 });
 
 canvas.addEventListener('mouseup', e => {
-  if (!drawing) return;
-  drawing = false;
-  const p = canvasPos(e); cx = p.x; cy = p.y;
-  commitRegion();
-  render();
+  if (!drawing) return; drawing = false;
+  const p = canvasPos(e); cx = p.x; cy = p.y; commitRegion(); render();
 });
 
 canvas.addEventListener('mouseleave', () => {
-  if (!drawing) return;
-  drawing = false;
-  commitRegion();
-  render();
+  if (!drawing) return; drawing = false; commitRegion(); render();
 });
 
-// Touch
 ['touchstart','touchmove','touchend'].forEach(type => {
   canvas.addEventListener(type, e => {
     e.preventDefault();
@@ -307,14 +490,11 @@ canvas.addEventListener('mouseleave', () => {
 
 function commitRegion() {
   const x = Math.min(sx, cx), y = Math.min(sy, cy);
-  const w = Math.abs(cx - sx), h = Math.abs(cy - sy);
+  const w = Math.abs(cx - sx),  h = Math.abs(cy - sy);
   if (w > 3 && h > 3) {
-    regions.push({
-      x, y, w, h,
-      type:  mode,
+    regions.push({ x, y, w, h, type: mode,
       blur:  parseInt(document.getElementById('blur-range').value),
-      color: document.getElementById('fill-color').value,
-    });
+      color: document.getElementById('fill-color').value });
     setCount();
   }
 }
@@ -325,47 +505,40 @@ function render(preview = false) {
   if (!img) return;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   ctx.drawImage(img, 0, 0);
-
-  for (const r of regions) applyRegion(r);
+  for (const r of regions) applyRegion(ctx, img, r);
 
   if (preview && drawing) {
-    const x = Math.min(sx, cx), y = Math.min(sy, cy);
-    const w = Math.abs(cx - sx), h = Math.abs(cy - sy);
-    const scale = canvas.width / canvas.getBoundingClientRect().width;
+    const x = Math.min(sx,cx), y = Math.min(sy,cy);
+    const w = Math.abs(cx-sx), h = Math.abs(cy-sy);
+    const sc = canvas.width / canvas.getBoundingClientRect().width;
     ctx.save();
-    ctx.strokeStyle = '#7dd3fc';
-    ctx.lineWidth   = 1.5 * scale;
-    ctx.setLineDash([6 * scale, 3 * scale]);
+    ctx.strokeStyle = '#7dd3fc'; ctx.lineWidth = 1.5*sc;
+    ctx.setLineDash([6*sc, 3*sc]);
     ctx.strokeRect(x, y, w, h);
-    ctx.fillStyle = 'rgba(125,211,252,0.07)';
-    ctx.fillRect(x, y, w, h);
+    ctx.fillStyle = 'rgba(125,211,252,0.07)'; ctx.fillRect(x, y, w, h);
     ctx.restore();
   }
 }
 
-function applyRegion(r) {
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(r.x, r.y, r.w, r.h);
-  ctx.clip();
+function applyRegion(c, source, r) {
+  c.save();
+  c.beginPath(); c.rect(r.x, r.y, r.w, r.h); c.clip();
   if (r.type === 'blur') {
-    ctx.filter = `blur(${r.blur}px)`;
-    ctx.drawImage(img, 0, 0);
+    c.filter = `blur(${r.blur}px)`; c.drawImage(source, 0, 0); c.filter = 'none';
   } else {
-    ctx.fillStyle = r.color;
-    ctx.fillRect(r.x, r.y, r.w, r.h);
+    c.fillStyle = r.color; c.fillRect(r.x, r.y, r.w, r.h);
   }
-  ctx.restore();
+  c.restore();
 }
 
 // ── Controls ──────────────────────────────────────────────────
 
 function setMode(m) {
   mode = m;
-  document.getElementById('btn-blur').classList.toggle('active', m === 'blur');
-  document.getElementById('btn-fill').classList.toggle('active', m === 'fill');
-  document.getElementById('blur-cfg').style.display = m === 'blur' ? '' : 'none';
-  document.getElementById('fill-cfg').style.display = m === 'fill' ? '' : 'none';
+  document.getElementById('btn-blur').classList.toggle('active', m==='blur');
+  document.getElementById('btn-fill').classList.toggle('active', m==='fill');
+  document.getElementById('blur-cfg').style.display = m==='blur' ? '' : 'none';
+  document.getElementById('fill-cfg').style.display = m==='fill' ? '' : 'none';
 }
 
 function pickColor(el) {
@@ -378,42 +551,79 @@ function clearPresetActive() {
   document.querySelectorAll('.cp').forEach(e => e.classList.remove('on'));
 }
 
-function undo() {
-  if (!regions.length) return;
-  regions.pop(); setCount(); render();
-}
+function undo()     { if (!regions.length) return; regions.pop(); setCount(); render(); }
+function clearAll() { if (!regions.length) return; regions=[]; setCount(); render(); }
+function setCount() { document.getElementById('region-count').textContent = regions.length; }
 
-function clearAll() {
-  if (!regions.length) return;
-  regions = []; setCount(); render();
-}
-
-function setCount() {
-  document.getElementById('region-count').textContent = regions.length;
-}
-
-// ── Download ──────────────────────────────────────────────────
+// ── Download (image) ──────────────────────────────────────────
 
 function download(fmt) {
-  if (!img)           { status('請先載入圖片'); return; }
-  if (!regions.length){ status('尚未標記任何區域'); return; }
-
-  document.getElementById('jpg-q-row').style.display = fmt === 'jpg' ? '' : 'none';
-
+  if (!img)            { showStatus('請先載入圖片'); return; }
+  if (!regions.length) { showStatus('尚未標記任何區域'); return; }
+  document.getElementById('jpg-q-row').style.display = fmt==='jpg' ? '' : 'none';
   const q    = parseInt(document.getElementById('jpg-q').value) / 100;
-  const mime = fmt === 'png' ? 'image/png' : 'image/jpeg';
-  const a    = document.createElement('a');
-  a.href     = canvas.toDataURL(mime, q);
-  a.download = `redacted.${fmt}`;
-  a.click();
-  status(`已下載 ${fmt.toUpperCase()}`, true);
+  const mime = fmt==='png' ? 'image/png' : 'image/jpeg';
+  const a = document.createElement('a');
+  a.href = canvas.toDataURL(mime, q); a.download = `redacted.${fmt}`; a.click();
+  showStatus(`已下載 ${fmt.toUpperCase()}`, true);
 }
 
-function status(msg, ok = false) {
+// ── Download (PDF) ────────────────────────────────────────────
+
+async function downloadPDF() {
+  if (!pdfDoc) { showStatus('請先載入 PDF'); return; }
+
+  // Save current page regions
+  pageRegions[currentPage] = [...regions];
+
+  const totalRedacted = Object.values(pageRegions).reduce((s, r) => s + r.length, 0);
+  if (totalRedacted === 0) { showStatus('尚未標記任何區域'); return; }
+
+  showLoading('產生 PDF…');
+  try {
+    const { PDFDocument } = PDFLib;
+    const outDoc = await PDFDocument.create();
+
+    for (let n = 1; n <= totalPages; n++) {
+      document.getElementById('loading-msg').textContent = `處理第 ${n} / ${totalPages} 頁…`;
+      const pageImg = await renderPageToImg(n);
+      const off     = document.createElement('canvas');
+      off.width = pageImg.naturalWidth; off.height = pageImg.naturalHeight;
+      const oc = off.getContext('2d');
+      oc.drawImage(pageImg, 0, 0);
+      for (const r of (pageRegions[n] || [])) applyRegion(oc, pageImg, r);
+
+      const jpgData  = off.toDataURL('image/jpeg', 0.95);
+      const jpgBytes = await fetch(jpgData).then(r => r.arrayBuffer());
+      const jpgImg   = await outDoc.embedJpg(jpgBytes);
+      const page     = outDoc.addPage([jpgImg.width, jpgImg.height]);
+      page.drawImage(jpgImg, { x: 0, y: 0, width: jpgImg.width, height: jpgImg.height });
+    }
+
+    const pw = document.getElementById('out-pw').value.trim();
+    const saveOpts = pw
+      ? { userPassword: pw, ownerPassword: pw,
+          permissions: { printing: 'lowResolution', copying: false } }
+      : {};
+
+    const bytes = await outDoc.save(saveOpts);
+    const blob  = new Blob([bytes], { type: 'application/pdf' });
+    const a     = document.createElement('a');
+    a.href      = URL.createObjectURL(blob);
+    a.download  = 'redacted.pdf'; a.click();
+    hideLoading(); showStatus('已下載 PDF', true);
+  } catch (e) {
+    hideLoading(); showStatus('產生失敗：' + e.message);
+  }
+}
+
+// ── Status ────────────────────────────────────────────────────
+
+function showStatus(msg, ok = false) {
   const el = document.getElementById('status');
   el.textContent = msg;
-  el.className = 'status' + (ok ? ' ok' : '');
-  setTimeout(() => { el.textContent = ''; el.className = 'status'; }, 3000);
+  el.className = 'status' + (ok ? ' ok' : ' err');
+  setTimeout(() => { el.textContent=''; el.className='status'; }, 3000);
 }
 </script>
 </body>

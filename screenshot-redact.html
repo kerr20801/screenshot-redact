@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>screenshot-redact</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0f1117; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; min-height: 100vh; display: flex; flex-direction: column; }
+
+  header { padding: 14px 24px; border-bottom: 1px solid #2a2d3e; display: flex; align-items: center; gap: 16px; flex-shrink: 0; }
+  header h1 { font-size: 1.1rem; color: #7dd3fc; letter-spacing: -0.01em; }
+  header .sub { color: #475569; font-size: 0.82rem; }
+  header .privacy { margin-left: auto; font-size: 0.72rem; color: #374151; }
+
+  .workspace { display: flex; flex: 1; overflow: hidden; }
+
+  /* ── Canvas area ── */
+  .canvas-area {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    overflow: auto; background: #080b10; position: relative;
+  }
+  .canvas-area.drag-over { background: #0f1f3d; }
+
+  .drop-zone {
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px; width: 100%; height: 100%; color: #334155; user-select: none;
+    pointer-events: none;
+  }
+  .drop-zone svg { width: 56px; height: 56px; opacity: 0.25; }
+  .drop-zone p { font-size: 1rem; color: #475569; }
+  .drop-zone small { font-size: 0.78rem; }
+
+  .upload-btn {
+    pointer-events: all; background: #1e3a5f; color: #7dd3fc;
+    border: 1px solid #2563eb; padding: 9px 22px; border-radius: 6px;
+    cursor: pointer; font-size: 0.88rem;
+  }
+  .upload-btn:hover { background: #1e40af; }
+
+  #canvas {
+    display: none; cursor: crosshair;
+    max-width: 100%; max-height: calc(100vh - 54px);
+    image-rendering: -webkit-optimize-contrast; image-rendering: crisp-edges;
+  }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    width: 234px; background: #1a1d2e; border-left: 1px solid #2a2d3e;
+    display: flex; flex-direction: column; overflow-y: auto; flex-shrink: 0;
+  }
+  .sb { padding: 13px 14px; border-bottom: 1px solid #2a2d3e; }
+  .sb h3 {
+    font-size: 0.68rem; color: #64748b; text-transform: uppercase;
+    letter-spacing: 0.06em; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;
+  }
+  .badge {
+    background: #1e293b; border: 1px solid #334155; padding: 1px 7px;
+    border-radius: 8px; font-size: 0.68rem; color: #94a3b8; font-weight: normal;
+  }
+
+  /* Mode toggle */
+  .mode-toggle { display: flex; gap: 4px; }
+  .mode-btn {
+    flex: 1; padding: 7px 4px; border: 1px solid #334155; background: #0f1117;
+    color: #94a3b8; border-radius: 5px; cursor: pointer; font-size: 0.8rem; text-align: center;
+    transition: all .15s;
+  }
+  .mode-btn.active { background: #7dd3fc; color: #000; border-color: #7dd3fc; font-weight: 600; }
+
+  /* Slider */
+  .sl { margin-top: 9px; }
+  .sl label { font-size: 0.78rem; color: #94a3b8; display: flex; justify-content: space-between; margin-bottom: 4px; }
+  input[type=range] { width: 100%; accent-color: #7dd3fc; cursor: pointer; }
+
+  /* Color presets */
+  .presets { display: flex; gap: 6px; margin-top: 9px; flex-wrap: wrap; }
+  .cp {
+    width: 24px; height: 24px; border-radius: 4px;
+    border: 2px solid #334155; cursor: pointer; transition: border-color .1s;
+  }
+  .cp:hover, .cp.on { border-color: #7dd3fc; }
+
+  /* Color picker row */
+  .cr { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .cr label { font-size: 0.78rem; color: #94a3b8; flex: 1; }
+  input[type=color] { width: 36px; height: 28px; border: 1px solid #334155; border-radius: 4px; background: none; cursor: pointer; padding: 2px; }
+
+  /* Buttons */
+  .btn {
+    width: 100%; padding: 8px; border: 1px solid #334155; background: #0f1117;
+    color: #cbd5e1; border-radius: 5px; cursor: pointer; font-size: 0.8rem;
+    text-align: center; margin-bottom: 5px; transition: all .15s;
+  }
+  .btn:last-child { margin-bottom: 0; }
+  .btn:hover { background: #1a2040; border-color: #7dd3fc; color: #7dd3fc; }
+  .btn.danger { border-color: #450a0a; color: #fca5a5; }
+  .btn.danger:hover { background: #2d0808; border-color: #dc2626; }
+  .btn.primary { background: #1e3a5f; border-color: #2563eb; color: #7dd3fc; font-weight: 600; }
+  .btn.primary:hover { background: #1e40af; }
+
+  .dl-row { display: flex; gap: 5px; }
+  .dl-row .btn { margin-bottom: 0; }
+
+  .status { font-size: 0.73rem; color: #475569; text-align: center; margin-top: 7px; min-height: 16px; }
+  .status.ok { color: #4ade80; }
+
+  .hint {
+    flex: 1; display: flex; align-items: flex-end;
+    padding: 14px;
+  }
+  .hint p { font-size: 0.72rem; color: #334155; line-height: 1.7; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>screenshot-redact</h1>
+  <span class="sub">截圖遮蔽工具</span>
+  <span class="privacy">純瀏覽器 · 不上傳 · 不儲存</span>
+</header>
+
+<div class="workspace">
+
+  <!-- Canvas area -->
+  <div class="canvas-area" id="canvas-area">
+    <div class="drop-zone" id="drop-zone">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+        <rect x="3" y="3" width="18" height="18" rx="2.5"/>
+        <circle cx="8.5" cy="8.5" r="1.5"/>
+        <path d="M21 15l-5-5L5 21"/>
+      </svg>
+      <p>拖曳截圖到這裡</p>
+      <small>或貼上 Ctrl+V</small>
+      <button class="upload-btn" onclick="document.getElementById('file-input').click()">選擇圖片</button>
+      <small>PNG · JPG · WebP</small>
+    </div>
+    <canvas id="canvas"></canvas>
+  </div>
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+
+    <div class="sb">
+      <h3>遮蔽方式</h3>
+      <div class="mode-toggle">
+        <button class="mode-btn active" id="btn-blur" onclick="setMode('blur')">模糊</button>
+        <button class="mode-btn" id="btn-fill" onclick="setMode('fill')">填色</button>
+      </div>
+
+      <!-- Blur -->
+      <div id="blur-cfg">
+        <div class="sl">
+          <label>強度 <span id="blur-val">14</span> px</label>
+          <input type="range" id="blur-range" min="4" max="40" value="14"
+                 oninput="document.getElementById('blur-val').textContent=this.value">
+        </div>
+      </div>
+
+      <!-- Fill -->
+      <div id="fill-cfg" style="display:none">
+        <div class="presets">
+          <div class="cp on"  style="background:#000000" data-c="#000000" onclick="pickColor(this)"></div>
+          <div class="cp"     style="background:#1e293b" data-c="#1e293b" onclick="pickColor(this)"></div>
+          <div class="cp"     style="background:#7f1d1d" data-c="#7f1d1d" onclick="pickColor(this)"></div>
+          <div class="cp"     style="background:#1e3a5f" data-c="#1e3a5f" onclick="pickColor(this)"></div>
+          <div class="cp"     style="background:#14532d" data-c="#14532d" onclick="pickColor(this)"></div>
+          <div class="cp"     style="background:#f1f5f9" data-c="#f1f5f9" onclick="pickColor(this)"></div>
+        </div>
+        <div class="cr">
+          <label>自訂</label>
+          <input type="color" id="fill-color" value="#000000" oninput="clearPresetActive()">
+        </div>
+      </div>
+    </div>
+
+    <div class="sb">
+      <h3>區域 <span class="badge" id="region-count">0</span></h3>
+      <button class="btn" onclick="undo()">↩ 撤銷最後一個</button>
+      <button class="btn danger" onclick="clearAll()">✕ 清除全部</button>
+    </div>
+
+    <div class="sb">
+      <h3>下載</h3>
+      <div class="dl-row">
+        <button class="btn primary" onclick="download('png')">PNG</button>
+        <button class="btn primary" onclick="download('jpg')">JPG</button>
+      </div>
+      <div class="sl" id="jpg-q-row" style="display:none">
+        <label>品質 <span id="q-val">92</span>%</label>
+        <input type="range" id="jpg-q" min="60" max="100" value="92"
+               oninput="document.getElementById('q-val').textContent=this.value">
+      </div>
+      <div class="status" id="status"></div>
+    </div>
+
+    <div class="hint">
+      <p>
+        在圖片上拖曳框出要遮蔽的區域<br>
+        支援多個區域疊加<br>
+        所有處理在你的瀏覽器本機完成
+      </p>
+    </div>
+
+  </div>
+</div>
+
+<input type="file" id="file-input" accept="image/*" onchange="loadFile(this.files[0])">
+
+<script>
+const canvas  = document.getElementById('canvas');
+const ctx     = canvas.getContext('2d');
+const cArea   = document.getElementById('canvas-area');
+const dropZone= document.getElementById('drop-zone');
+
+let img     = null;   // original Image object
+let regions = [];     // [{x,y,w,h,type,blur,color}]
+let mode    = 'blur';
+let drawing = false;
+let sx, sy, cx, cy;  // start / current mouse pos (canvas coords)
+
+// ── Image loading ─────────────────────────────────────────────
+
+function loadFile(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  const url = URL.createObjectURL(file);
+  loadSrc(url);
+}
+
+function loadSrc(src) {
+  const i = new Image();
+  i.onload = () => {
+    img = i;
+    regions = [];
+    canvas.width  = i.naturalWidth;
+    canvas.height = i.naturalHeight;
+    dropZone.style.display = 'none';
+    canvas.style.display   = 'block';
+    render();
+    setCount();
+  };
+  i.src = src;
+}
+
+// Paste (Ctrl+V)
+document.addEventListener('paste', e => {
+  for (const item of (e.clipboardData?.items || [])) {
+    if (item.type.startsWith('image/')) { loadFile(item.getAsFile()); break; }
+  }
+});
+
+// Drag & drop on the whole canvas area
+cArea.addEventListener('dragover',  e => { e.preventDefault(); cArea.classList.add('drag-over'); });
+cArea.addEventListener('dragleave', ()=> cArea.classList.remove('drag-over'));
+cArea.addEventListener('drop', e => {
+  e.preventDefault(); cArea.classList.remove('drag-over');
+  if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]);
+});
+
+// ── Canvas coordinate conversion ──────────────────────────────
+
+function canvasPos(e) {
+  const r  = canvas.getBoundingClientRect();
+  const sx = canvas.width  / r.width;
+  const sy = canvas.height / r.height;
+  return { x: (e.clientX - r.left) * sx, y: (e.clientY - r.top) * sy };
+}
+
+// ── Drawing ───────────────────────────────────────────────────
+
+canvas.addEventListener('mousedown', e => {
+  if (!img) return;
+  drawing = true;
+  const p = canvasPos(e); sx = cx = p.x; sy = cy = p.y;
+});
+
+canvas.addEventListener('mousemove', e => {
+  if (!drawing) return;
+  const p = canvasPos(e); cx = p.x; cy = p.y;
+  render(true);
+});
+
+canvas.addEventListener('mouseup', e => {
+  if (!drawing) return;
+  drawing = false;
+  const p = canvasPos(e); cx = p.x; cy = p.y;
+  commitRegion();
+  render();
+});
+
+canvas.addEventListener('mouseleave', () => {
+  if (!drawing) return;
+  drawing = false;
+  commitRegion();
+  render();
+});
+
+// Touch
+['touchstart','touchmove','touchend'].forEach(type => {
+  canvas.addEventListener(type, e => {
+    e.preventDefault();
+    const t   = e.changedTouches[0];
+    const map = { touchstart:'mousedown', touchmove:'mousemove', touchend:'mouseup' };
+    canvas.dispatchEvent(new MouseEvent(map[type], { clientX: t.clientX, clientY: t.clientY }));
+  }, { passive: false });
+});
+
+function commitRegion() {
+  const x = Math.min(sx, cx), y = Math.min(sy, cy);
+  const w = Math.abs(cx - sx), h = Math.abs(cy - sy);
+  if (w > 3 && h > 3) {
+    regions.push({
+      x, y, w, h,
+      type:  mode,
+      blur:  parseInt(document.getElementById('blur-range').value),
+      color: document.getElementById('fill-color').value,
+    });
+    setCount();
+  }
+}
+
+// ── Rendering ─────────────────────────────────────────────────
+
+function render(preview = false) {
+  if (!img) return;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(img, 0, 0);
+
+  for (const r of regions) applyRegion(r);
+
+  if (preview && drawing) {
+    const x = Math.min(sx, cx), y = Math.min(sy, cy);
+    const w = Math.abs(cx - sx), h = Math.abs(cy - sy);
+    const scale = canvas.width / canvas.getBoundingClientRect().width;
+    ctx.save();
+    ctx.strokeStyle = '#7dd3fc';
+    ctx.lineWidth   = 1.5 * scale;
+    ctx.setLineDash([6 * scale, 3 * scale]);
+    ctx.strokeRect(x, y, w, h);
+    ctx.fillStyle = 'rgba(125,211,252,0.07)';
+    ctx.fillRect(x, y, w, h);
+    ctx.restore();
+  }
+}
+
+function applyRegion(r) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(r.x, r.y, r.w, r.h);
+  ctx.clip();
+  if (r.type === 'blur') {
+    ctx.filter = `blur(${r.blur}px)`;
+    ctx.drawImage(img, 0, 0);
+  } else {
+    ctx.fillStyle = r.color;
+    ctx.fillRect(r.x, r.y, r.w, r.h);
+  }
+  ctx.restore();
+}
+
+// ── Controls ──────────────────────────────────────────────────
+
+function setMode(m) {
+  mode = m;
+  document.getElementById('btn-blur').classList.toggle('active', m === 'blur');
+  document.getElementById('btn-fill').classList.toggle('active', m === 'fill');
+  document.getElementById('blur-cfg').style.display = m === 'blur' ? '' : 'none';
+  document.getElementById('fill-cfg').style.display = m === 'fill' ? '' : 'none';
+}
+
+function pickColor(el) {
+  document.querySelectorAll('.cp').forEach(e => e.classList.remove('on'));
+  el.classList.add('on');
+  document.getElementById('fill-color').value = el.dataset.c;
+}
+
+function clearPresetActive() {
+  document.querySelectorAll('.cp').forEach(e => e.classList.remove('on'));
+}
+
+function undo() {
+  if (!regions.length) return;
+  regions.pop(); setCount(); render();
+}
+
+function clearAll() {
+  if (!regions.length) return;
+  regions = []; setCount(); render();
+}
+
+function setCount() {
+  document.getElementById('region-count').textContent = regions.length;
+}
+
+// ── Download ──────────────────────────────────────────────────
+
+function download(fmt) {
+  if (!img)           { status('請先載入圖片'); return; }
+  if (!regions.length){ status('尚未標記任何區域'); return; }
+
+  document.getElementById('jpg-q-row').style.display = fmt === 'jpg' ? '' : 'none';
+
+  const q    = parseInt(document.getElementById('jpg-q').value) / 100;
+  const mime = fmt === 'png' ? 'image/png' : 'image/jpeg';
+  const a    = document.createElement('a');
+  a.href     = canvas.toDataURL(mime, q);
+  a.download = `redacted.${fmt}`;
+  a.click();
+  status(`已下載 ${fmt.toUpperCase()}`, true);
+}
+
+function status(msg, ok = false) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = 'status' + (ok ? ' ok' : '');
+  setTimeout(() => { el.textContent = ''; el.className = 'status'; }, 3000);
+}
+</script>
+</body>
+</html>

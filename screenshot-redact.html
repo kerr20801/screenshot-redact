@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>screenshot-redact</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-<script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script src="https://unpkg.com/@cantoo/pdf-lib/dist/pdf-lib.min.js"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { background: #0f1117; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; min-height: 100vh; display: flex; flex-direction: column; }
@@ -251,10 +251,9 @@
                    oninput="document.getElementById('q-pdf-val').textContent=this.value">
           </div>
         </div>
+        <input type="password" class="pw-input" id="out-pw"
+               placeholder="設定 PDF 密碼（選填）" style="margin-bottom:6px">
         <button class="btn primary" onclick="downloadPDF()">下載 PDF</button>
-        <p style="font-size:0.7rem;color:#374151;margin-top:6px;line-height:1.5">
-          PDF 密碼保護需使用桌面軟體<br>（如 Adobe Acrobat、LibreOffice）
-        </p>
       </div>
 
       <div class="status" id="status"></div>
@@ -635,13 +634,33 @@ async function downloadPDF() {
       page.drawImage(embeddedImg, { x: 0, y: 0, width: embeddedImg.width, height: embeddedImg.height });
     }
 
+    const pw = document.getElementById('out-pw').value.trim();
+    if (pw) {
+      try {
+        await outDoc.encrypt({
+          userPassword:  pw,
+          ownerPassword: pw,
+          permissions: {
+            printing:    'highResolution',
+            copying:     false,
+            modifying:   false,
+            annotating:  false,
+          }
+        });
+      } catch (e) {
+        // @cantoo/pdf-lib 不支援時靜默跳過，檔案仍可下載
+        showStatus('⚠️ 加密失敗，下載未加密版本', false);
+      }
+    }
+
     const date  = new Date().toISOString().slice(0,10).replace(/-/g,'');
     const bytes = await outDoc.save();
     const blob  = new Blob([bytes], { type: 'application/pdf' });
     const a     = document.createElement('a');
     a.href      = URL.createObjectURL(blob);
     a.download  = `${origFilename}_${date}.pdf`; a.click();
-    hideLoading(); showStatus('已下載 PDF', true);
+    hideLoading();
+    showStatus(pw ? '已下載加密 PDF 🔒' : '已下載 PDF', true);
   } catch (e) {
     hideLoading(); showStatus('產生失敗：' + e.message);
   }
